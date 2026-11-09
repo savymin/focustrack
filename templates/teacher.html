@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Teacher Monitoring Dashboard</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; color: #333; }
+    h1 { color: #1a73e8; font-size: 24px; margin-bottom: 5px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    input, button { padding: 10px; font-size: 14px; margin-right: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #1a73e8; color: white; border: none; cursor: pointer; font-weight: 500; }
+    button:hover { background: #1557b0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+    th, td { padding: 12px; border-bottom: 1px solid #dee2e6; text-align: left; font-size: 14px; }
+    th { background: #f1f3f4; font-weight: 600; }
+    .badge-active { background: #e6f4ea; color: #137333; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+    .badge-away { background: #fce8e6; color: #c5221f; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+    .badge-left { background: #f1f3f4; color: #5f6368; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Google Meet Class Monitor</h1>
+  <p>Real-time student tab focus and participation tracker</p>
+
+  <div class="card">
+    {% if not google_connected %}
+      <p style="color: #c5221f; font-weight: bold;">Google Account not connected!</p>
+      <a href="/auth/google"><button style="background: #34a853;">Connect Teacher Google Account</button></a>
+    {% else %}
+      <p style="color: #137333; font-weight: bold;">✓ Google Account Connected</p>
+      <h3>Start a New Class Session</h3>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <input type="text" id="className" placeholder="Class Name (e.g. BSIT 3-5)" style="flex: 1; min-width: 200px;">
+        <input type="email" id="teacherEmail" placeholder="Teacher Email" style="flex: 1; min-width: 200px;">
+        <input type="text" id="meetingUrl" placeholder="Google Meet URL (https://meet.google.com/abc-defg-hij)" style="flex: 2; min-width: 300px;">
+        <button id="startBtn">Start Session</button>
+      </div>
+    {% endif %}
+  </div>
+
+  <div id="dashboardSection" class="card" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h2 id="sessionTitle" style="margin: 0;">Session Dashboard</h2>
+      <div>
+        <button id="syncBtn" style="background: #fbbc05; color: black;">Sync Google Meet Participants</button>
+        <button id="endBtn" style="background: #ea4335;">End Session & Email Report</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Student Name</th>
+          <th>Status</th>
+          <th>Time In</th>
+          <th>Tab Changes (Away)</th>
+          <th>Last Activity</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="studentTableBody">
+        <tr><td colspan="6" style="text-align: center;">Waiting for students to connect...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentSessionId = null;
+
+    {% if google_connected %}
+    document.getElementById('startBtn').addEventListener('click', async () => {
+      const className = document.getElementById('className').value.trim();
+      const teacherEmail = document.getElementById('teacherEmail').value.trim();
+      const meetingUrl = document.getElementById('meetingUrl').value.trim();
+
+      if (!className || !teacherEmail || !meetingUrl) {
+        alert("Please fill in all fields.");
+        return;
+      }
+
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ class_name: className, teacher_email: teacherEmail, meeting_url: meetingUrl })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        currentSessionId = data.session_id;
+        document.getElementById('dashboardSection').style.display = 'block';
+        document.getElementById('sessionTitle').textContent = `Session: ${className}`;
+        loadSessionData();
+        alert("Session started successfully!");
+      } else {
+        alert(data.error || "Failed to start session.");
+      }
+    });
+
+    document.getElementById('syncBtn').addEventListener('click', async () => {
+      if (!currentSessionId) return;
+      const res = await fetch(`/api/session/${currentSessionId}/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        loadSessionData();
+      } else {
+        alert(data.error || "Sync failed.");
+      }
+    });
+
+    document.getElementById('endBtn').addEventListener('click', async () => {
+      if (!currentSessionId || !confirm("End this session? An Excel report will be emailed to you.")) return;
+      const res = await fetch(`/api/session/${currentSessionId}/end`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        alert("Session ended and report emailed successfully!");
+        window.location.reload();
+      }
+    });
+    {% endif %}
+
+    async function loadSessionData() {
+      if (!currentSessionId) return;
+      const res = await fetch(`/api/session/${currentSessionId}`);
+      const data = await res.json();
+      if (res.ok) {
+        renderStudents(data.students);
+      }
+    }
+
+    function renderStudents(students) {
+      const tbody = document.getElementById('studentTableBody');
+      if (students.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">No students detected yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      students.forEach(st => {
+        const tr = document.createElement('tr');
+        let badgeClass = 'badge-active';
+        if (st.status === 'AWAY') badgeClass = 'badge-away';
+        if (st.status === 'LEFT') badgeClass = 'badge-left';
+
+        tr.innerHTML = `
+          <td><strong>${st.student_name}</strong></td>
+          <td><span class="${badgeClass}">${st.status}</span></td>
+          <td>${st.time_in ? new Date(st.time_in).toLocaleTimeString() : '-'}</td>
+          <td>${st.tab_changes}</td>
+          <td>${st.last_activity ? new Date(st.last_activity).toLocaleTimeString() : '-'}</td>
+          <td><a href="/api/session/${currentSessionId}/report" target="_blank"><button style="padding: 4px 8px; font-size: 12px;">Report</button></a></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    socket.on('student_update', (data) => {
+      if (currentSessionId) loadSessionData();
+    });
+
+    socket.on('participants_sync', (data) => {
+      if (currentSessionId && data.session_id === currentSessionId) loadSessionData();
+    });
+  </script>
+</body>
+</html>

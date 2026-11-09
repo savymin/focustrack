@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Student Monitor Registration</title>
+  <style>
+    body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 350px; text-align: center; }
+    input, button { width: 100%; padding: 12px; margin-top: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    button { background: #1a73e8; color: white; border: none; font-weight: bold; cursor: pointer; }
+    button:hover { background: #1557b0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Student Connection</h2>
+    <p style="font-size: 13px; color: #666;">Enter your details to link your extension to the active class session.</p>
+    <input type="number" id="sessionId" placeholder="Session ID">
+    <input type="text" id="studentName" placeholder="Full Name (e.g. Savannah Masmela)">
+    <button id="connectBtn">Connect Monitor</button>
+    <p id="msg" style="font-size: 13px; margin-top: 15px; font-weight: bold;"></p>
+  </div>
+
+  <script>
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      const sessionId = document.getElementById('sessionId').value.trim();
+      const studentName = document.getElementById('studentName').value.trim();
+      const msg = document.getElementById('msg');
+
+      if (!sessionId || !studentName) {
+        msg.style.color = 'red';
+        msg.textContent = 'Please fill in all fields.';
+        return;
+      }
+
+      // Save credentials locally for extension to use
+      localStorage.setItem('monitor_session_id', sessionId);
+      localStorage.setItem('monitor_student_name', studentName);
+      localStorage.setItem('monitor_server_url', 'http://127.0.0.1:5000');
+
+      try {
+        const res = await fetch('http://127.0.0.1:5000/api/student/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: parseInt(sessionId), student_name: studentName })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem('monitor_student_id', data.student_id);
+          msg.style.color = 'green';
+          msg.textContent = 'Connected successfully! You can join your Google Meet now.';
+        } else {
+          msg.style.color = 'red';
+          msg.textContent = data.error || 'Connection failed.';
+        }
+      } catch (err) {
+        msg.style.color = 'red';
+        msg.textContent = 'Could not reach server.';
+      }
+    });
+  </script>
+</body>
+</html>

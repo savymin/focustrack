@@ -1,0 +1,4 @@
+credentials.json
+google_token.json
+*.db
+__pycache__/
